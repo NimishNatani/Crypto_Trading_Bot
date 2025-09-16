@@ -10,12 +10,15 @@ import threading
 import warnings
 warnings.filterwarnings('ignore')
 
+
 # Import our custom modules
 from bot.trading_engine import CryptoTradingBot
 from bot.ml_model import MLPredictor
 from ui.dashboard_components import DashboardComponents
 from utils.data_manager import DataManager
 from utils.performance_calculator import PerformanceCalculator
+from streamlit_autorefresh import st_autorefresh
+st_autorefresh(interval=2000, limit=None, key="charts_autorefresh")
 
 # Page configuration
 st.set_page_config(
@@ -164,6 +167,15 @@ def load_css():
             font-weight: 700;
             margin-bottom: 2rem;
         }
+        
+        /* Stop button warning */
+        .stop-warning {
+            font-size: 0.75rem;
+            color: #ffb347;
+            margin-top: 5px;
+            text-align: center;
+            opacity: 0.8;
+        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -175,11 +187,11 @@ class TradingBotApp:
         self.performance_calc = PerformanceCalculator()
         
     def initialize_session_state(self):
-        """Initialize all session state variables"""
+        """Initialize all session state variables - FIXED to start from scratch"""
         if 'bot' not in st.session_state:
+            # Create a fresh bot without any pre-existing trades
             st.session_state.bot = CryptoTradingBot()
-            # Initialize with some historical trades for demo
-            st.session_state.bot._simulate_some_trades()
+            # Remove the simulate trades call to start fresh
             
         if 'ml_predictor' not in st.session_state:
             st.session_state.ml_predictor = MLPredictor()
@@ -205,9 +217,17 @@ class TradingBotApp:
         # Initialize trading thread variables
         if 'trading_active' not in st.session_state:
             st.session_state.trading_active = False
+            
+        # Stop button click counter for double-click functionality
+        if 'stop_click_count' not in st.session_state:
+            st.session_state.stop_click_count = 0
+            
+        # Auto-refresh timer for UI updates
+        if 'last_ui_update' not in st.session_state:
+            st.session_state.last_ui_update = datetime.now()
 
     def start_trading(self):
-        """Start the trading bot - Fixed version"""
+        """Start the trading bot - Fixed to ensure UI updates"""
         try:
             # Set all necessary flags
             st.session_state.running = True
@@ -229,8 +249,9 @@ class TradingBotApp:
             
             st.success("Bot Started Successfully!")
             
-            # Force immediate update
+            # Force immediate update and UI refresh
             st.session_state.force_update = True
+            st.session_state.last_ui_update = datetime.now()
             
         except Exception as e:
             st.error(f"Failed to start bot: {str(e)}")
@@ -239,23 +260,112 @@ class TradingBotApp:
             st.session_state.trading_active = False
     
     def stop_trading(self):
-        """Stop the trading bot"""
+        """Stop the trading bot - Enhanced with double-click protection and position closure"""
         try:
-            st.session_state.running = False
-            st.session_state.auto_trade = False
-            st.session_state.trading_active = False
+            current_time = datetime.now()
             
-            # Add stop alert
-            st.session_state.alerts.append({
-                'time': datetime.now(),
-                'message': "Trading Bot Stopped",
-                'type': 'danger'
-            })
+            # Initialize first click time if not set
+            if 'first_stop_click_time' not in st.session_state:
+                st.session_state.first_stop_click_time = None
             
-            st.warning("Bot Stopped!")
-            
+            # If this is the first click or more than 3 seconds have passed
+            if (st.session_state.first_stop_click_time is None or 
+                (current_time - st.session_state.first_stop_click_time).total_seconds() > 3):
+                
+                # First click - start timer
+                st.session_state.first_stop_click_time = current_time
+                st.session_state.stop_click_count = 1
+                
+                position_count = len(st.session_state.bot.positions)
+                if position_count > 0:
+                    st.warning(f"Click STOP again within 3 seconds to confirm stopping the bot and closing {position_count} open position(s)")
+                else:
+                    st.info("Click STOP again within 3 seconds to confirm stopping the bot")
+                
+            else:
+                # Second click within 3 seconds - actually stop and close positions
+                bot = st.session_state.bot
+                
+                # Close all open positions before stopping
+                positions_closed = 0
+                total_pnl_from_closure = 0
+                
+                if bot.positions:
+                    positions_to_close = bot.positions.copy()  # Create copy to avoid modification during iteration
+                    
+                    for pos in positions_to_close:
+                        # Calculate profit/loss at market close
+                        if pos['type'] == "LONG":
+                            profit_loss = pos['size'] * (bot.current_price - pos['entry_price'])
+                        else:  # SHORT
+                            profit_loss = pos['size'] * (pos['entry_price'] - bot.current_price)
+                        
+                        # Return margin plus profit/loss
+                        bot.balance += pos['margin_used'] + profit_loss
+                        bot.total_profit_loss += profit_loss
+                        bot.realized_pnl += profit_loss
+                        
+                        # Record closed position
+                        closed_pos = pos.copy()
+                        closed_pos['close_price'] = bot.current_price
+                        closed_pos['close_time'] = datetime.now()
+                        closed_pos['profit_loss'] = profit_loss
+                        closed_pos['close_reason'] = "🛑 Manual Stop"
+                        closed_pos['profit_pct'] = profit_loss / (pos['size'] * pos['entry_price']) if pos['entry_price'] > 0 else 0
+                        
+                        bot.closed_positions.append(closed_pos)
+                        
+                        # Update statistics
+                        bot.total_trades += 1
+                        if profit_loss > 0:
+                            bot.winning_trades += 1
+                            bot.largest_win = max(bot.largest_win, profit_loss)
+                        else:
+                            bot.largest_loss = min(bot.largest_loss, profit_loss)
+                        
+                        positions_closed += 1
+                        total_pnl_from_closure += profit_loss
+                        
+                        # Add individual position closure alert
+                        alert_type = 'success' if profit_loss > 0 else 'danger'
+                        st.session_state.alerts.append({
+                            'time': datetime.now(),
+                            'message': f"Position #{pos['id']} closed: ${profit_loss:+,.2f} - Manual Stop",
+                            'type': alert_type
+                        })
+                    
+                    # Clear all positions
+                    bot.positions.clear()
+                
+                # Stop the bot
+                st.session_state.running = False
+                st.session_state.auto_trade = False
+                st.session_state.trading_active = False
+                
+                # Add comprehensive stop alert
+                if positions_closed > 0:
+                    st.session_state.alerts.append({
+                        'time': datetime.now(),
+                        'message': f"Trading Bot Stopped - {positions_closed} positions closed, Total P&L: ${total_pnl_from_closure:+,.2f}",
+                        'type': 'danger'
+                    })
+                    st.warning(f"Bot Stopped! Closed {positions_closed} positions with total P&L: ${total_pnl_from_closure:+,.2f}")
+                else:
+                    st.session_state.alerts.append({
+                        'time': datetime.now(),
+                        'message': "Trading Bot Stopped",
+                        'type': 'danger'
+                    })
+                    st.warning("Bot Stopped!")
+                
+                # Reset click tracking
+                st.session_state.stop_click_count = 0
+                st.session_state.first_stop_click_time = None
+                
         except Exception as e:
             st.error(f"Failed to stop bot: {str(e)}")
+            st.session_state.stop_click_count = 0
+            st.session_state.first_stop_click_time = None
     
     def reset_trading(self):
         """Reset the trading bot"""
@@ -265,14 +375,15 @@ class TradingBotApp:
             st.session_state.auto_trade = False
             st.session_state.trading_active = False
             
-            # Create fresh instances
+            # Create fresh instances without demo trades
             st.session_state.bot = CryptoTradingBot()
-            st.session_state.bot._simulate_some_trades()  # Add demo trades
+            # Remove the simulate trades to start truly fresh
             st.session_state.ml_predictor = MLPredictor()
             st.session_state.alerts = []
             st.session_state.force_update = True
+            st.session_state.stop_click_count = 0
             
-            st.info("Bot Reset Complete!")
+            st.info("Bot Reset Complete - Starting from scratch!")
             
         except Exception as e:
             st.error(f"Failed to reset bot: {str(e)}")
@@ -411,10 +522,17 @@ class TradingBotApp:
                     self.start_trading()
                     
             with col2:
-                if st.button("⏹️ STOP", 
-                           use_container_width=True, 
-                           key="stop_btn",
-                           disabled=not st.session_state.running):
+                stop_btn_clicked = st.button("⏹️ STOP", 
+                                           use_container_width=True, 
+                                           key="stop_btn",
+                                           disabled=not st.session_state.running)
+                
+                # Show double-click warning only when running
+                if st.session_state.running:
+                    st.markdown('<div class="stop-warning">Click twice to stop</div>', 
+                               unsafe_allow_html=True)
+                
+                if stop_btn_clicked:
                     self.stop_trading()
                     
             if st.button("🔄 RESET", 
@@ -816,11 +934,15 @@ class TradingBotApp:
             st.info("No trading history available. Start trading to generate performance reports.")
 
     def update_data(self):
-        """Update price data and execute trading logic"""
+        """Update price data and execute trading logic - ENHANCED FOR AUTO-REFRESH"""
         current_time = datetime.now()
         
-        # Update every 3 seconds when running, every 10 seconds when stopped
-        update_interval = 3 if st.session_state.running else 10
+        # Update every 2 seconds when running for better responsiveness
+        update_interval = 2 if st.session_state.running else 8
+        
+        # Reset stop button counter after 3 seconds
+        if (current_time - st.session_state.last_ui_update).total_seconds() > 3:
+            st.session_state.stop_click_count = 0
         
         if (current_time - st.session_state.last_update).total_seconds() >= update_interval:
             # Always update price data for chart
@@ -833,13 +955,15 @@ class TradingBotApp:
             st.session_state.last_update = current_time
             st.session_state.update_counter += 1
             
-            # Trigger rerun for live updates
-            if st.session_state.running or st.session_state.force_update:
+            # Auto-rerun for live updates when bot is running
+            if st.session_state.running:
+                st.rerun()
+            elif st.session_state.force_update:
                 st.session_state.force_update = False
                 st.rerun()
 
     def run(self):
-        """Main application runner - FIXED VERSION"""
+        """Main application runner - ENHANCED VERSION"""
         # Load CSS
         load_css()
         
