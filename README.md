@@ -2,6 +2,8 @@ README_MD = """# AI Crypto Trading Bot Pro
 
 A sophisticated real-time cryptocurrency trading bot with machine learning predictions, technical analysis, and professional UI built with Streamlit.
 
+https://cryptotradingbot-k2qnx6ewozewgc4jfxiv7n.streamlit.app/
+
 ## Features
 
 ### 🤖 Advanced AI Trading
