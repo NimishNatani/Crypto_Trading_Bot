@@ -8,7 +8,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 class CryptoTradingBot:
-    def __init__(self, initial_balance=10000, crypto_symbol="BTC/USDT"):
+    def __init__(self, initial_balance=1000,crypto_symbol="BTC/USDT"):
         self.initial_balance = initial_balance
         self.balance = initial_balance
         self.crypto_symbol = crypto_symbol
