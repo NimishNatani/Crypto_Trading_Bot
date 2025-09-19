@@ -459,6 +459,7 @@ class TradingBotApp:
             else:
                 status_text = "🔴 STOPPED"
                 status_class = "status-stopped"
+                bot.initial_balance = bot.balance
             
             st.markdown(f'<div class="{status_class}"><strong>{status_text}</strong></div>', 
                        unsafe_allow_html=True)
@@ -473,11 +474,16 @@ class TradingBotApp:
             st.markdown("### 📊 Trading Parameters")
             
             # Bot parameter controls
-            initial_balance = st.number_input("Initial Balance ($)", 
-                                            value=float(bot.initial_balance), 
-                                            min_value=1000.0, 
-                                            step=1000.0,
-                                            disabled=st.session_state.running)
+            initial_balance = st.number_input(
+    "Initial Balance ($)",
+    value=float(bot.initial_balance),
+    min_value=1000.0,
+    step=1000.0,
+    disabled=st.session_state.running
+)           
+            
+            bot.balance = initial_balance
+            bot.initial_balance = initial_balance
             
             leverage = st.selectbox("Leverage", [1, 2, 3, 5, 10], 
                                   index=[1, 2, 3, 5, 10].index(bot.leverage),
