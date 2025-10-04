@@ -609,10 +609,10 @@ class TradingBotApp:
                 positive=price_change >= 0
             )
         
-        # Portfolio Balance
+        # Portfolio Balance - CORRECTED: Total Equity = Initial Balance + Total P&L
         with col2:
-            total_equity = bot.balance + sum([pos.get('margin_used', 0) for pos in bot.positions])
-            total_equity += bot._calculate_unrealized_pnl()
+            unrealized_pnl = bot._calculate_unrealized_pnl()
+            total_equity = bot.initial_balance + bot.total_profit_loss + unrealized_pnl
             balance_change = ((total_equity - bot.initial_balance) / bot.initial_balance * 100)
             
             self.dashboard.render_metric_card(
@@ -655,7 +655,6 @@ class TradingBotApp:
                 change=f"{winning_trades}/{total_trades} trades",
                 positive=win_rate > 50
             )
-
     def render_live_trading_tab(self):
         """Render live trading interface"""
         bot = st.session_state.bot
