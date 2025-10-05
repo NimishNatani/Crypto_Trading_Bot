@@ -2,6 +2,8 @@ streamlit
 pandas
 numpy
 plotly
+requests
+ccxt
+python-binance
+streamlit-autorefresh
 scikit-learn
-python-dateutil
-streamlit_autorefresh
