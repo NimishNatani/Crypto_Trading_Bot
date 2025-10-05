@@ -10,7 +10,6 @@ import threading
 import warnings
 warnings.filterwarnings('ignore')
 
-
 # Import our custom modules
 from bot.trading_engine import CryptoTradingBot
 from bot.ml_model import MLPredictor
@@ -18,7 +17,8 @@ from ui.dashboard_components import DashboardComponents
 from utils.data_manager import DataManager
 from utils.performance_calculator import PerformanceCalculator
 from streamlit_autorefresh import st_autorefresh
-st_autorefresh(interval=2000, limit=None, key="charts_autorefresh")
+# Auto-refresh only every 5 seconds to reduce full page reloads
+st_autorefresh(interval=5000, limit=None, key="charts_autorefresh")
 
 # Page configuration
 st.set_page_config(
@@ -187,11 +187,10 @@ class TradingBotApp:
         self.performance_calc = PerformanceCalculator()
         
     def initialize_session_state(self):
-        """Initialize all session state variables - FIXED to start from scratch"""
+        """Initialize all session state variables with real data"""
         if 'bot' not in st.session_state:
-            # Create a fresh bot without any pre-existing trades
-            st.session_state.bot = CryptoTradingBot()
-            # Remove the simulate trades call to start fresh
+            # Create bot with real market data (BTCUSDT from Binance)
+            st.session_state.bot = CryptoTradingBot(symbol="ETHUSDT")
             
         if 'ml_predictor' not in st.session_state:
             st.session_state.ml_predictor = MLPredictor()
@@ -214,42 +213,35 @@ class TradingBotApp:
         if 'force_update' not in st.session_state:
             st.session_state.force_update = False
             
-        # Initialize trading thread variables
         if 'trading_active' not in st.session_state:
             st.session_state.trading_active = False
             
-        # Stop button click counter for double-click functionality
         if 'stop_click_count' not in st.session_state:
             st.session_state.stop_click_count = 0
             
-        # Auto-refresh timer for UI updates
         if 'last_ui_update' not in st.session_state:
             st.session_state.last_ui_update = datetime.now()
 
     def start_trading(self):
-        """Start the trading bot - Fixed to ensure UI updates"""
+        """Start the trading bot"""
         try:
-            # Set all necessary flags
             st.session_state.running = True
             st.session_state.auto_trade = True
             st.session_state.trading_active = True
             
             # Train ML model if needed
             if not st.session_state.ml_predictor.is_trained:
-                with st.spinner("Training ML model..."):
+                with st.spinner("Training ML model on real market data..."):
                     if st.session_state.ml_predictor.train_model(st.session_state.bot.price_history):
                         st.success("ML Model trained successfully!")
             
-            # Add success alert
             st.session_state.alerts.append({
                 'time': datetime.now(),
-                'message': "Trading Bot Started - Ready to trade!",
+                'message': "Trading Bot Started - Using real Binance data!",
                 'type': 'success'
             })
             
-            st.success("Bot Started Successfully!")
-            
-            # Force immediate update and UI refresh
+            st.success("Bot Started Successfully with Real Market Data!")
             st.session_state.force_update = True
             st.session_state.last_ui_update = datetime.now()
             
@@ -260,19 +252,16 @@ class TradingBotApp:
             st.session_state.trading_active = False
     
     def stop_trading(self):
-        """Stop the trading bot - Enhanced with double-click protection and position closure"""
+        """Stop the trading bot with double-click protection"""
         try:
             current_time = datetime.now()
             
-            # Initialize first click time if not set
             if 'first_stop_click_time' not in st.session_state:
                 st.session_state.first_stop_click_time = None
             
-            # If this is the first click or more than 3 seconds have passed
             if (st.session_state.first_stop_click_time is None or 
                 (current_time - st.session_state.first_stop_click_time).total_seconds() > 3):
                 
-                # First click - start timer
                 st.session_state.first_stop_click_time = current_time
                 st.session_state.stop_click_count = 1
                 
@@ -283,29 +272,23 @@ class TradingBotApp:
                     st.info("Click STOP again within 3 seconds to confirm stopping the bot")
                 
             else:
-                # Second click within 3 seconds - actually stop and close positions
                 bot = st.session_state.bot
-                
-                # Close all open positions before stopping
                 positions_closed = 0
                 total_pnl_from_closure = 0
                 
                 if bot.positions:
-                    positions_to_close = bot.positions.copy()  # Create copy to avoid modification during iteration
+                    positions_to_close = bot.positions.copy()
                     
                     for pos in positions_to_close:
-                        # Calculate profit/loss at market close
                         if pos['type'] == "LONG":
                             profit_loss = pos['size'] * (bot.current_price - pos['entry_price'])
-                        else:  # SHORT
+                        else:
                             profit_loss = pos['size'] * (pos['entry_price'] - bot.current_price)
                         
-                        # Return margin plus profit/loss
                         bot.balance += pos['margin_used'] + profit_loss
                         bot.total_profit_loss += profit_loss
                         bot.realized_pnl += profit_loss
                         
-                        # Record closed position
                         closed_pos = pos.copy()
                         closed_pos['close_price'] = bot.current_price
                         closed_pos['close_time'] = datetime.now()
@@ -315,7 +298,6 @@ class TradingBotApp:
                         
                         bot.closed_positions.append(closed_pos)
                         
-                        # Update statistics
                         bot.total_trades += 1
                         if profit_loss > 0:
                             bot.winning_trades += 1
@@ -326,7 +308,6 @@ class TradingBotApp:
                         positions_closed += 1
                         total_pnl_from_closure += profit_loss
                         
-                        # Add individual position closure alert
                         alert_type = 'success' if profit_loss > 0 else 'danger'
                         st.session_state.alerts.append({
                             'time': datetime.now(),
@@ -334,15 +315,12 @@ class TradingBotApp:
                             'type': alert_type
                         })
                     
-                    # Clear all positions
                     bot.positions.clear()
                 
-                # Stop the bot
                 st.session_state.running = False
                 st.session_state.auto_trade = False
                 st.session_state.trading_active = False
                 
-                # Add comprehensive stop alert
                 if positions_closed > 0:
                     st.session_state.alerts.append({
                         'time': datetime.now(),
@@ -358,7 +336,6 @@ class TradingBotApp:
                     })
                     st.warning("Bot Stopped!")
                 
-                # Reset click tracking
                 st.session_state.stop_click_count = 0
                 st.session_state.first_stop_click_time = None
                 
@@ -370,20 +347,18 @@ class TradingBotApp:
     def reset_trading(self):
         """Reset the trading bot"""
         try:
-            # Stop everything first
             st.session_state.running = False
             st.session_state.auto_trade = False
             st.session_state.trading_active = False
             
-            # Create fresh instances without demo trades
-            st.session_state.bot = CryptoTradingBot()
-            # Remove the simulate trades to start truly fresh
+            # Create fresh bot with real data
+            st.session_state.bot = CryptoTradingBot(symbol="ETHUSDT")
             st.session_state.ml_predictor = MLPredictor()
             st.session_state.alerts = []
             st.session_state.force_update = True
             st.session_state.stop_click_count = 0
             
-            st.info("Bot Reset Complete - Starting from scratch!")
+            st.info("Bot Reset Complete - Reconnected to live market data!")
             
         except Exception as e:
             st.error(f"Failed to reset bot: {str(e)}")
@@ -397,7 +372,7 @@ class TradingBotApp:
         ml_predictor = st.session_state.ml_predictor
         
         try:
-            # Always update price for live chart
+            # Update with real-time data
             bot._trading_step()
             
             # Check for trading opportunities
@@ -405,12 +380,10 @@ class TradingBotApp:
                 should_trade, action, target = bot._should_open_position()
                 
                 if should_trade and action and target:
-                    # Enhanced decision making with ML
                     if ml_predictor.is_trained:
                         prediction, confidence = ml_predictor.predict_market_direction(bot.price_history)
                         ml_action = "LONG" if prediction == 1 else "SHORT"
                         
-                        # Trade if conditions are met
                         if (ml_action == action and confidence > 0.55) or confidence > 0.75:
                             bot._open_position(action, target)
                             
@@ -420,8 +393,7 @@ class TradingBotApp:
                                 'type': 'success'
                             })
                     else:
-                        # Use technical analysis only
-                        if target > 0.015:  # Strong signal required
+                        if target > 0.015:
                             bot._open_position(action, target)
                             st.session_state.alerts.append({
                                 'time': datetime.now(),
@@ -451,7 +423,6 @@ class TradingBotApp:
         with st.sidebar:
             st.markdown("### 🤖 Bot Configuration")
             
-            # Status display
             bot = st.session_state.bot
             if st.session_state.running:
                 status_text = "🟢 RUNNING"
@@ -459,7 +430,7 @@ class TradingBotApp:
             else:
                 status_text = "🔴 STOPPED"
                 status_class = "status-stopped"
-                bot.initial_balance = bot.balance
+                # REMOVED: bot.initial_balance = bot.balance (THIS WAS THE BUG)
             
             st.markdown(f'<div class="{status_class}"><strong>{status_text}</strong></div>', 
                        unsafe_allow_html=True)
@@ -470,17 +441,15 @@ class TradingBotApp:
                 
             st.markdown("---")
             
-            # Trading parameters
             st.markdown("### 📊 Trading Parameters")
             
-            # Bot parameter controls
             initial_balance = st.number_input(
-    "Initial Balance ($)",
-    value=float(bot.initial_balance),
-    min_value=1000.0,
-    step=1000.0,
-    disabled=st.session_state.running
-)           
+                "Initial Balance ($)",
+                value=float(bot.initial_balance),
+                min_value=1000.0,
+                step=1000.0,
+                disabled=st.session_state.running
+            )           
             
             bot.balance = initial_balance
             bot.initial_balance = initial_balance
@@ -493,7 +462,6 @@ class TradingBotApp:
                                        index=min(bot.max_open_positions - 1, 3),
                                        disabled=st.session_state.running)
             
-            # Update bot parameters when not running
             if not st.session_state.running:
                 bot.initial_balance = initial_balance
                 bot.leverage = leverage
@@ -509,7 +477,6 @@ class TradingBotApp:
                                      int(bot.max_position_size * 100), 1,
                                      disabled=st.session_state.running) / 100
             
-            # Update risk parameters when not running
             if not st.session_state.running:
                 bot.stop_loss_threshold = stop_loss
                 bot.max_position_size = position_size
@@ -533,7 +500,6 @@ class TradingBotApp:
                                            key="stop_btn",
                                            disabled=not st.session_state.running)
                 
-                # Show double-click warning only when running
                 if st.session_state.running:
                     st.markdown('<div class="stop-warning">Click twice to stop</div>', 
                                unsafe_allow_html=True)
@@ -546,7 +512,6 @@ class TradingBotApp:
                        key="reset_btn"):
                 self.reset_trading()
                 
-            # Bot statistics
             st.markdown("---")
             st.markdown("### 📈 Quick Stats")
             
@@ -565,14 +530,11 @@ class TradingBotApp:
         """Render main trading dashboard"""
         bot = st.session_state.bot
         
-        # Header
         st.markdown('<h1 class="main-header">🤖 AI CRYPTO TRADING BOT PRO</h1>', 
                    unsafe_allow_html=True)
         
-        # Real-time metrics row
         self.render_metrics_row()
         
-        # Main content tabs
         tab1, tab2, tab3, tab4 = st.tabs(["📈 Live Trading", "📊 Analytics", 
                                           "💼 Portfolio", "📋 Performance"])
         
@@ -594,13 +556,11 @@ class TradingBotApp:
         
         col1, col2, col3, col4, col5 = st.columns(5)
         
-        # Calculate price change
         price_change = 0
         if len(bot.price_history) > 1:
             price_change = ((bot.current_price - bot.price_history[-2]['price']) / 
                            bot.price_history[-2]['price'] * 100)
         
-        # Current Price
         with col1:
             self.dashboard.render_metric_card(
                 title="Current Price",
@@ -609,7 +569,6 @@ class TradingBotApp:
                 positive=price_change >= 0
             )
         
-        # Portfolio Balance - CORRECTED: Total Equity = Initial Balance + Total P&L
         with col2:
             unrealized_pnl = bot._calculate_unrealized_pnl()
             total_equity = bot.initial_balance + bot.total_profit_loss + unrealized_pnl
@@ -622,7 +581,6 @@ class TradingBotApp:
                 positive=balance_change >= 0
             )
         
-        # Total P&L
         with col3:
             unrealized_pnl = bot._calculate_unrealized_pnl()
             total_pnl = bot.total_profit_loss + unrealized_pnl
@@ -634,7 +592,6 @@ class TradingBotApp:
                 positive=total_pnl >= 0
             )
         
-        # Open Positions
         with col4:
             self.dashboard.render_metric_card(
                 title="Open Positions",
@@ -643,7 +600,6 @@ class TradingBotApp:
                 positive=True
             )
         
-        # Win Rate
         with col5:
             total_trades = len(bot.closed_positions)
             winning_trades = len([t for t in bot.closed_positions if t['profit_loss'] > 0])
@@ -655,11 +611,11 @@ class TradingBotApp:
                 change=f"{winning_trades}/{total_trades} trades",
                 positive=win_rate > 50
             )
+
     def render_live_trading_tab(self):
         """Render live trading interface"""
         bot = st.session_state.bot
         
-        # Chart controls
         col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
         with col1:
             show_indicators = st.checkbox("📈 Technical Indicators", value=True)
@@ -669,28 +625,25 @@ class TradingBotApp:
             chart_type = st.selectbox("📊 Chart Type", ["Candlestick", "Line"], index=0)
         with col4:
             if st.button("🔄 Refresh Data"):
-                bot._simulate_price_movement()
+                bot._fetch_current_price()
                 st.rerun()
         
-        # Show current trading status
         if st.session_state.running:
-            st.success("📊 Live Trading Active - Bot is analyzing market conditions...")
+            st.success("📊 Live Trading Active - Using real Binance market data...")
         else:
             st.info("⏸️ Trading Stopped - Click START to begin live trading")
         
-        # Main price chart
         if len(bot.price_history) > 0:
             try:
                 chart = self.dashboard.create_price_chart(bot.price_history, show_indicators)
                 st.plotly_chart(chart, use_container_width=True, key="main_chart")
             except Exception as e:
                 st.error(f"Chart error: {e}")
-                st.info("Generating new chart data...")
-                bot._simulate_price_movement()
+                st.info("Fetching new market data...")
+                bot._fetch_current_price()
         else:
-            st.info("No price data available. The bot will generate data when started.")
+            st.info("Loading real market data...")
         
-        # Live positions and alerts
         col1, col2 = st.columns([1, 1])
         
         with col1:
@@ -707,15 +660,13 @@ class TradingBotApp:
         
         if bot.positions:
             for pos in bot.positions:
-                # Calculate current P&L
                 if pos['type'] == 'LONG':
                     current_pnl = pos['size'] * (bot.current_price - pos['entry_price'])
                     current_pnl_pct = (bot.current_price - pos['entry_price']) / pos['entry_price']
-                else:  # SHORT
+                else:
                     current_pnl = pos['size'] * (pos['entry_price'] - bot.current_price)
                     current_pnl_pct = (pos['entry_price'] - bot.current_price) / pos['entry_price']
                 
-                # Position card
                 pnl_color = '#00ff88' if current_pnl >= 0 else '#ff4444'
                 position_color = '#00ff88' if pos['type'] == 'LONG' else '#ff4444'
                 
@@ -754,7 +705,6 @@ class TradingBotApp:
         """Render alerts panel"""
         st.markdown("### 🚨 Recent Alerts")
         
-        # Keep only last 5 alerts
         if len(st.session_state.alerts) > 5:
             st.session_state.alerts = st.session_state.alerts[-5:]
         
@@ -781,7 +731,6 @@ class TradingBotApp:
         
         st.markdown("### 📊 Technical Analysis & ML Predictions")
         
-        # Technical indicators
         if len(bot.price_history) > 20:
             indicators = bot._calculate_technical_indicators()
             
@@ -804,7 +753,6 @@ class TradingBotApp:
                     self.dashboard.render_indicator_card("Volume Trend", indicators['volume_trend'],
                                                        unit="x", positive=indicators['volume_trend'] > 1)
         
-        # ML Prediction
         if ml_predictor.is_trained and len(bot.price_history) > 0:
             prediction, confidence = ml_predictor.predict_market_direction(bot.price_history)
             
@@ -831,7 +779,6 @@ class TradingBotApp:
                 """, unsafe_allow_html=True)
             
             with col2:
-                # Model performance metrics
                 model_accuracy = getattr(ml_predictor, 'last_accuracy', 0.873)
                 
                 st.markdown(f"""
@@ -850,7 +797,7 @@ class TradingBotApp:
                 </div>
                 """, unsafe_allow_html=True)
         else:
-            st.info("ML model not trained yet. Start the bot to train the model with historical data.")
+            st.info("ML model will train on real market data when you start the bot.")
 
     def render_portfolio_tab(self):
         """Render portfolio management interface"""
@@ -858,7 +805,6 @@ class TradingBotApp:
         
         st.markdown("### Portfolio Overview")
         
-        # Portfolio metrics
         total_margin_used = sum([pos.get('margin_used', 0) for pos in bot.positions])
         available_balance = bot.balance
         unrealized_pnl = bot._calculate_unrealized_pnl()
@@ -876,10 +822,9 @@ class TradingBotApp:
         with col4:
             self.dashboard.render_metric_card("Total Equity", f"${total_equity:,.2f}")
         
-        # Recent trade history
         if bot.closed_positions:
             st.markdown("### Recent Trades")
-            recent_trades = bot.closed_positions[-10:]  # Last 10 trades
+            recent_trades = bot.closed_positions[-10:]
             
             trade_data = []
             for trade in recent_trades:
@@ -907,10 +852,8 @@ class TradingBotApp:
         st.markdown("### Performance Analysis")
         
         if bot.closed_positions:
-            # Calculate performance metrics
             perf_metrics = self.performance_calc.calculate_performance_metrics(bot)
             
-            # Performance overview
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
@@ -930,7 +873,6 @@ class TradingBotApp:
                                                 f"{perf_metrics['max_drawdown']:.2f}%",
                                                 positive=False)
             
-            # Performance chart
             if len(bot.closed_positions) > 1:
                 portfolio_chart = self.dashboard.create_portfolio_chart(bot)
                 st.plotly_chart(portfolio_chart, use_container_width=True)
@@ -939,19 +881,21 @@ class TradingBotApp:
             st.info("No trading history available. Start trading to generate performance reports.")
 
     def update_data(self):
-        """Update price data and execute trading logic - ENHANCED FOR AUTO-REFRESH"""
+        """Update price data and execute trading logic - OPTIMIZED"""
         current_time = datetime.now()
         
-        # Update every 2 seconds when running for better responsiveness
-        update_interval = 2 if st.session_state.running else 8
+        # Longer intervals to reduce page refreshes
+        update_interval = 5 if st.session_state.running else 10
         
-        # Reset stop button counter after 3 seconds
         if (current_time - st.session_state.last_ui_update).total_seconds() > 3:
             st.session_state.stop_click_count = 0
         
         if (current_time - st.session_state.last_update).total_seconds() >= update_interval:
-            # Always update price data for chart
-            st.session_state.bot._simulate_price_movement()
+            # Fetch new real-time price data
+            try:
+                st.session_state.bot._fetch_current_price()
+            except Exception as e:
+                print(f"Error fetching price: {e}")
             
             # Execute trading logic if running
             if st.session_state.running:
@@ -960,31 +904,27 @@ class TradingBotApp:
             st.session_state.last_update = current_time
             st.session_state.update_counter += 1
             
-            # Auto-rerun for live updates when bot is running
-            if st.session_state.running:
+            # Only force rerun occasionally to reduce full page refreshes
+            if st.session_state.running and st.session_state.update_counter % 2 == 0:
                 st.rerun()
             elif st.session_state.force_update:
                 st.session_state.force_update = False
                 st.rerun()
 
     def run(self):
-        """Main application runner - ENHANCED VERSION"""
-        # Load CSS
+        """Main application runner"""
         load_css()
         
-        # Update data continuously
         self.update_data()
         
-        # Render the UI
         self.render_sidebar()
         self.render_main_dashboard()
         
-        # Footer with status info
         st.markdown("---")
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.markdown("**Version:** v2.1.0 Pro")
+            st.markdown("**Version:** v2.1.0 Pro (Real Data)")
         with col2:
             st.markdown(f"**Last Update:** {datetime.now().strftime('%H:%M:%S')}")
         with col3:
@@ -993,7 +933,6 @@ class TradingBotApp:
             status_text = "Live Trading" if st.session_state.running else "Stopped"
             st.markdown(f"**Status:** {status_text}")
 
-# Main application entry point
 def main():
     """Main function with proper error handling"""
     try:
@@ -1003,6 +942,5 @@ def main():
         st.error(f"Application error: {str(e)}")
         st.info("Please refresh the page or click RESET to restart the application.")
 
-# Run the app
 if __name__ == "__main__":
     main()
