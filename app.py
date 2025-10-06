@@ -190,7 +190,7 @@ class TradingBotApp:
         """Initialize all session state variables with real data"""
         if 'bot' not in st.session_state:
             # Create bot with real market data (BTCUSDT from Binance)
-            st.session_state.bot = CryptoTradingBot(symbol="ETHUSDT")
+            st.session_state.bot = CryptoTradingBot(symbol="BTCUSDT")
             
         if 'ml_predictor' not in st.session_state:
             st.session_state.ml_predictor = MLPredictor()
@@ -237,11 +237,11 @@ class TradingBotApp:
             
             st.session_state.alerts.append({
                 'time': datetime.now(),
-                'message': "Trading Bot Started - Using real Binance data!",
+                'message': "Trading Bot Started - Using CoinGecko/CryptoCompare APIs!",
                 'type': 'success'
             })
             
-            st.success("Bot Started Successfully with Real Market Data!")
+            st.success("Bot Started Successfully with Real Market Data (Streamlit Cloud Compatible)!")
             st.session_state.force_update = True
             st.session_state.last_ui_update = datetime.now()
             
@@ -351,8 +351,8 @@ class TradingBotApp:
             st.session_state.auto_trade = False
             st.session_state.trading_active = False
             
-            # Create fresh bot with real data
-            st.session_state.bot = CryptoTradingBot(symbol="ETHUSDT")
+            # Create fresh bot with real data (Streamlit Cloud compatible)
+            st.session_state.bot = CryptoTradingBot(symbol="BTC")
             st.session_state.ml_predictor = MLPredictor()
             st.session_state.alerts = []
             st.session_state.force_update = True
@@ -629,7 +629,7 @@ class TradingBotApp:
                 st.rerun()
         
         if st.session_state.running:
-            st.success("📊 Live Trading Active - Using real Binance market data...")
+            st.success("📊 Live Trading Active - Using CoinGecko/CryptoCompare real market data...")
         else:
             st.info("⏸️ Trading Stopped - Click START to begin live trading")
         
@@ -642,7 +642,12 @@ class TradingBotApp:
                 st.info("Fetching new market data...")
                 bot._fetch_current_price()
         else:
-            st.info("Loading real market data...")
+            st.warning("⏳ Loading real market data... This may take 10-30 seconds on first load.")
+            st.info("If loading persists, the bot will switch to demo mode automatically.")
+            # Try to fetch data
+            if bot.current_price == 0:
+                with st.spinner("Connecting to cryptocurrency APIs..."):
+                    bot._initialize_real_data()
         
         col1, col2 = st.columns([1, 1])
         
@@ -944,3 +949,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+     
+     
