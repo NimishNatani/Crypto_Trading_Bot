@@ -139,16 +139,23 @@ class DashboardComponents:
                           name='SMA 5'), row=1, col=1
             )
         
-        # Volume chart
-        colors = [self.colors['success'] if close >= open else self.colors['danger'] 
-                 for close, open in zip(df['close'], df['open'])]
-        
+        # Volume chart (all green)
+        colors = ['#39FF14' for _ in df['volume']]
+
         fig.add_trace(
-            go.Bar(x=df['timestamp'], y=df['volume'],
-                   marker_color=colors, opacity=0.7, name='Volume'),
-            row=2, col=1
-        )
-        
+           go.Bar(
+              x=df['timestamp'],
+              y=df['volume'],
+              marker_color=colors,
+              opacity=0.7,
+              name='Volume'
+             ),
+        row=2, col=1
+            )
+                 
+              # Volume chart (each bar green)
+
+
         # RSI indicator
         if len(df) >= 14:
             price_changes = df['close'].diff()
