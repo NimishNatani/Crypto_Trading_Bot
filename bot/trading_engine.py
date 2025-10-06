@@ -6,18 +6,19 @@ from typing import Dict, List, Tuple, Optional
 import random
 import warnings
 warnings.filterwarnings('ignore')
-from data.crypto_data_fetcher import BinanceDataFetcher
+from data.crypto_data_fetcher import UnifiedCryptoFetcher
 
 class CryptoTradingBot:
-    def __init__(self, initial_balance=1000, leverage=5, symbol="ETHUSDT"):
+    def __init__(self, initial_balance=1000, leverage=5, symbol="BTC"):
         # Basic setup
         self.initial_balance = initial_balance
         self.balance = initial_balance
         self.leverage = leverage
         self.symbol = symbol
         
-        # Initialize data fetcher for REAL market data
-        self.data_fetcher = BinanceDataFetcher(symbol=symbol)
+        # Initialize UNIFIED data fetcher (works on Streamlit Cloud)
+        print(f"Initializing crypto fetcher for {symbol}...")
+        self.data_fetcher = UnifiedCryptoFetcher(symbol=symbol)
         
         # Initialize empty structures
         self.positions = []
@@ -37,11 +38,9 @@ class CryptoTradingBot:
         self.largest_loss = 0
         
         # Risk management parameters - OPTIMIZED FOR FASTER P&L
-        self.max_position_size = 0.15      # 15% per trade
-        self.max_open_positions = 3         # Up to 3 simultaneous
-        self.leverage = 5                   # 5x leverage
-        self.stop_loss_threshold = 0.03     # 3% stop loss
-        self.base_target = 0.025            # 2.5% profit target
+        self.max_position_size = 0.15  # Increased from 0.05 to 0.15 (15% per trade)
+        self.max_open_positions = 3
+        self.stop_loss_threshold = 0.03
         
         # Trading state
         self.running = False
@@ -51,73 +50,97 @@ class CryptoTradingBot:
         self._initialize_real_data()
     
     def _initialize_real_data(self):
-        """Initialize with real historical data from Binance"""
+        """Initialize with REAL historical data only - NO FAKE DATA"""
         try:
-            print("Fetching real market data from Binance...")
+            print("Fetching REAL market data (Streamlit Cloud compatible)...")
+            print("APIs: CoinGecko, CryptoCompare, Coinbase")
             
-            # Get last 100 5-minute candles (8+ hours of data)
-            df = self.data_fetcher.get_klines(interval='5m', limit=100)
+            # Try to get historical data with longer timeout
+            df = self.data_fetcher.get_historical_data(days=7)
             
-            if df is not None and not df.empty:
+            if df is not None and not df.empty and len(df) > 10:
                 # Convert to price history format
                 for idx, row in df.iterrows():
                     self.price_history.append({
                         'timestamp': row['timestamp'],
-                        'open': float(row['open']),
-                        'high': float(row['high']),
-                        'low': float(row['low']),
-                        'close': float(row['close']),
-                        'price': float(row['close']),
-                        'volume': float(row['volume'])
+                        'open': float(row['open']) if 'open' in row else float(row['price']),
+                        'high': float(row['high']) if 'high' in row else float(row['price']),
+                        'low': float(row['low']) if 'low' in row else float(row['price']),
+                        'close': float(row['close']) if 'close' in row else float(row['price']),
+                        'price': float(row['close']) if 'close' in row else float(row['price']),
+                        'volume': float(row.get('volume', 0))
                     })
                 
                 # Set current price
                 if self.price_history:
                     self.current_price = self.price_history[-1]['price']
-                    print(f"✓ Loaded {len(self.price_history)} real data points")
+                    print(f"✓ Loaded {len(self.price_history)} REAL data points")
                     print(f"✓ Current {self.symbol} price: ${self.current_price:,.2f}")
-                else:
-                    self._fetch_current_price()
-            else:
-                print("Warning: Could not load historical data, fetching current price...")
-                self._fetch_current_price()
+                    if hasattr(self.data_fetcher, 'last_successful_api'):
+                        print(f"✓ Data source: {self.data_fetcher.last_successful_api}")
+                    return True
+            
+            # If historical data failed, try current price only
+            print("Historical data insufficient, trying current price only...")
+            success = self._fetch_current_price()
+            
+            if not success or self.current_price == 0:
+                print("❌ FAILED: Could not fetch real cryptocurrency data")
+                print("❌ All APIs unreachable. Please check:")
+                print("   1. Internet connection")
+                print("   2. Streamlit Cloud network access")
+                print("   3. API status at https://status.coingecko.com")
+                raise Exception("Cannot fetch real market data - all APIs failed")
+            
+            return success
                 
         except Exception as e:
-            print(f"Error initializing real data: {e}")
-            print("Attempting to fetch current price as fallback...")
-            self._fetch_current_price()
+            print(f"❌ ERROR: {e}")
+            raise Exception(f"Failed to initialize with real data: {e}")
     
     def _fetch_current_price(self):
-        """Fetch current real-time price from Binance"""
-        try:
-            data = self.data_fetcher.get_24h_ticker()
-            
-            if data and 'price' in data:
-                self.current_price = data['price']
+        """Fetch current real-time price - STREAMLIT CLOUD COMPATIBLE"""
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                print(f"Fetching current price (attempt {retry_count + 1}/{max_retries})...")
+                data = self.data_fetcher.get_current_price()
                 
-                # Add to price history
-                self.price_history.append({
-                    'timestamp': data.get('timestamp', datetime.now()),
-                    'open': self.current_price,
-                    'high': self.current_price,
-                    'low': self.current_price,
-                    'close': self.current_price,
-                    'price': self.current_price,
-                    'volume': data.get('volume_24h', 0)
-                })
+                if data and 'price' in data and data['price'] > 0:
+                    self.current_price = data['price']
+                    
+                    # Add to price history
+                    self.price_history.append({
+                        'timestamp': data.get('timestamp', datetime.now()),
+                        'open': self.current_price,
+                        'high': self.current_price,
+                        'low': self.current_price,
+                        'close': self.current_price,
+                        'price': self.current_price,
+                        'volume': data.get('volume_24h', 0)
+                    })
+                    
+                    # Keep only last 500 data points
+                    if len(self.price_history) > 500:
+                        self.price_history = self.price_history[-500:]
+                    
+                    print(f"✓ Current price fetched: ${self.current_price:,.2f}")
+                    return True
                 
-                # Keep only last 500 data points
-                if len(self.price_history) > 500:
-                    self.price_history = self.price_history[-500:]
-                
-                return True
-            else:
-                print("Failed to fetch price data")
-                return False
-                
-        except Exception as e:
-            print(f"Error fetching current price: {e}")
-            return False
+                retry_count += 1
+                if retry_count < max_retries:
+                    time.sleep(2)
+                    
+            except Exception as e:
+                print(f"Error on attempt {retry_count + 1}: {e}")
+                retry_count += 1
+                if retry_count < max_retries:
+                    time.sleep(2)
+        
+        print("Failed to fetch price after all retries")
+        return False
     
     def _trading_step(self):
         """Execute one trading step with real data"""
